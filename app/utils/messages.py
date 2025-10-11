@@ -726,34 +726,3 @@ async def ainvoke_graph(
     
     # 최종 결과 반환
     return final_result
-
-
-# def iter_graph_stream(
-#     graph: CompiledStateGraph,
-#     inputs: dict,
-#     config: RunnableConfig,
-#     node_names: List[str] | None = None,
-# ) -> Iterable[str]:
-#     """
-#     LangGraph의 stream을 웹 스트리밍용으로 래핑하여 '문자 청크'를 yield합니다.
-#     기존 stream_graph(콘솔 출력)과 달리 print하지 않고, 웹으로 흘릴 수 있게 합니다.
-#     """
-#     node_names = node_names or []
-#     prev_node = ""
-#     for chunk_msg, metadata in graph.stream(inputs, config, stream_mode="messages"):
-#         curr_node = metadata.get("langgraph_node")
-
-#         # 특정 노드만 받고 싶으면 node_names 지정 (비워두면 전부)
-#         if node_names and curr_node not in node_names:
-#             continue
-
-#         text = getattr(chunk_msg, "content", None)
-#         if not text:
-#             continue
-
-#         # 노드가 바뀔 때 구분선 같은 걸 흘리고 싶다면(선택)
-#         # if curr_node != prev_node:
-#         #     yield f"\n=== {curr_node} ===\n"
-
-#         yield text
-#         prev_node = curr_node
