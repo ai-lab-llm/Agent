@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from langgraph.errors import GraphRecursionError
 from app.graph.workflow import run_graph
 from app.utils.intent import classify_intent_llm, list_known_names
-import asyncio
+import asyncio, re
 
 router = APIRouter()
 
@@ -18,10 +18,7 @@ class AskRequest(BaseModel):
 def _strip_tag(text: str) -> str:
     if not isinstance(text, str):
         return text
-    for tag in ("Final:", "Answer:"):
-        if text.startswith(tag):
-            return text[len(tag):].lstrip()
-    return text
+    return re.sub(r'(?m)^\s*(Final:|Answer:)\s*', '', text).strip()
 
 def _build_guide() -> str:
     names = list_known_names(limit=3)

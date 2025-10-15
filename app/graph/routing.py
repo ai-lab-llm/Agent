@@ -1,78 +1,68 @@
 import json, re
-from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 from app.core.llm import get_chat_llm
 
 METRIC_TO_COL = {
-    "imu_danger_level": "imu_danger_level", 
-    "stress": "stress",                  
+    "imu_danger_level": "imu_danger_level",
+    "stress": "stress",
     "hrv": "hrv",
-    "ppg_threat_detected": "ppg_threat_detected",                
+    "ppg_threat_detected": "ppg_threat_detected",
 }
 
-SEMANTICS_TEXT = (
-    "Column meanings:\n"
-    "- imu_danger_level: movement instability / fall / shaking / balance risk\n"
-    "- stress: psychological/physiological stress level\n"
-    "- hrv: heart rate variability index\n"
-    "- ppg_threat_detected: PPG-based biosignal threat percent (0~100; higher=worse)\n"
-)
+# === 의미 기반 스코어링(0~100)으로 단일 메트릭 선택: few-shot/키워드 폴백 없음 ===
+_SCORING_SYSTEM = """You are a strict semantic router for Korean analytics questions.
+Score how relevant EACH metric is (0~100; integers) by MEANING (not keywords). Then pick exactly ONE best metric.
 
-metric_classify_system = """You are a strict router.
-Classify the user's question into EXACTLY one metric among:
-- imu_danger_level (movement instability/fall/shaking/balance risk)
-- stress (psychological/physiological stress)
-- hrv (heart rate variability)
-- ppg_threat_detected (PPG-based biosignal threat; percent; higher is more dangerous)
+Canonical meanings:
+- imu_danger_level: bodily movement/posture/balance instability; shaking/tremor; fall-risk (physical instability of the person’s body)
+- stress: psychological/physiological stress state (mental/physio burden; NOT a sensor signal)
+- hrv: the HRV metric itself (variation of heartbeat intervals; a sensor-derived physiological metric)
+- ppg_threat_detected: PPG-based biosignal overall threat percent (sensor-level anomaly score; a summary for biosignals)
 
-Rules:
-- Output ONLY JSON, no text, with schema: {"metric": "<one_of_above>"}
-- Prefer imu_danger_level when the question is about movement, balance, shaking, fall, instability, posture, acceleration, or '움직임 위험도'.
-- Prefer stress when explicitly about stress/스트레스.
-- Prefer hrv when about HRV/심박변이.
-- Prefer ppg_threat_detected when about PPG/생체신호 위협/위험 퍼센트/신호 이상.
+Disambiguation (VERY IMPORTANT):
+- If the subject of "instability(불안정)" is the **person's movement/body/posture/balance**, choose imu_danger_level.
+- If the subject is the **biosignal/sensor readings themselves** (e.g., “생체신호/신호/센서 수치가 불안정/이상”), do NOT choose imu_danger_level.
+  Prefer ppg_threat_detected as the overall biosignal threat; choose hrv ONLY when HRV is explicitly the target.
+- If the question explicitly names a metric (stress/HRV/PPG/IMU), choose that metric.
+- Resolve ties by these priorities (from generic to specific):
+  biosignal-overall → ppg_threat_detected; explicit HRV → hrv; motion/body instability → imu_danger_level; mental state → stress.
+
+Output ONLY compact JSON (no code fences, no extra text):
+{{
+  "scores": {{"imu_danger_level": <0-100>, "stress": <0-100>, "hrv": <0-100>, "ppg_threat_detected": <0-100>}},
+  "metric": "<imu_danger_level|stress|hrv|ppg_threat_detected>"
+}}
 """
 
-metric_classify_prompt = ChatPromptTemplate.from_messages([
-    ("system", metric_classify_system),
-    ("human", "Question:\n{question}\n\n{semantics}\nReturn JSON only."),
+_SCORING_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", _SCORING_SYSTEM),
+    ("human", "Question: {question}\nReturn JSON only.")
 ])
 
-json_parser = JsonOutputParser()
+def _parse_scores(text: str):
+    s = re.sub(r"^```(?:json)?|```$", "", (text or "").strip(), flags=re.MULTILINE)
+    m = re.search(r"\{.*\}", s, flags=re.DOTALL)
+    if m: s = m.group(0)
+    data = json.loads(s)
 
+    scores = data.get("scores") or {}
+    norm = {}
+    for k in METRIC_TO_COL.keys():
+        try:
+            norm[k] = int(scores.get(k, 0))
+        except Exception:
+            try: norm[k] = int(float(scores.get(k, 0)))
+            except Exception: norm[k] = 0
 
-def _metric_robust(text: str):
-    cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE)
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        cleaned = m.group(0)
-    data = json.loads(cleaned)
-    if not isinstance(data, dict) or "metric" not in data:
-        raise ValueError("bad json")
-    return data
-
-metric_robust_parser = StrOutputParser() | RunnableLambda(_metric_robust)
-
+    metric = (data.get("metric") or "").strip()
+    if metric not in METRIC_TO_COL:
+        metric = max(norm, key=norm.get)  # argmax fallback
+    return metric, norm
 
 def choose_metric(question: str) -> str:
     llm = get_chat_llm()
-    metric_router = (metric_classify_prompt | llm | json_parser).with_fallbacks(
-        [metric_classify_prompt | llm | metric_robust_parser]
-    )
-    try:
-        out = metric_router.invoke({"question": question, "semantics": SEMANTICS_TEXT})
-        metric = (out.get("metric") or "").strip()
-        col = METRIC_TO_COL.get(metric)
-        if col:
-            return col
-    except Exception:
-        pass
-    q = question.lower()
-    if any(k in q for k in ["ppg", "위협", "생체신호", "threat"]):
-        return "ppg_threat_detected"
-    if any(k in q for k in ["움직임 불안정","움직임 위험도","균형","넘어짐","흔들림","자세","가속도","movement","fall","shake","balance"]):
-        return "imu_danger_level"
-    if "hrv" in q or "심박" in q:
-        return "hrv"
-    return "stress"
+    parser = StrOutputParser() | RunnableLambda(_parse_scores)
+    metric_label, _scores = (_SCORING_PROMPT | llm | parser).invoke({"question": question})
+    return METRIC_TO_COL[metric_label]
