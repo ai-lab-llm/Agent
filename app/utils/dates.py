@@ -47,9 +47,6 @@ def extract_date_yyyy_mm_dd(q: str, now: datetime | None = None) -> str | None:
     return None
 
 
-# -----------------------------------------------------------------------------
-# KST 편의 함수
-# -----------------------------------------------------------------------------
 def _to_kst(dt: datetime) -> datetime:
     """입력 datetime을 KST 타임존의 aware datetime으로 변환."""
     if dt.tzinfo is None:
@@ -83,9 +80,6 @@ def week_window_kst(dt: datetime, *, offset_weeks: int = 0) -> tuple[datetime, d
     return start, end
 
 
-# -----------------------------------------------------------------------------
-# "이번주/지난주" 구간 해석
-# -----------------------------------------------------------------------------
 _WEEK_PATTERNS = [
     (re.compile(r"(이번\s*주|이번주)"), 0),
     (re.compile(r"(지난\s*주|지난주)"), -1),
@@ -106,10 +100,6 @@ def resolve_week_window_kst(text: str, now: datetime | None = None) -> tuple[dat
     return None
 
 def resolve_week_window_strings(text: str, now: datetime | None = None) -> tuple[str, str] | None:
-    """
-    resolve_week_window_kst의 문자열 버전.
-    'YYYY-MM-DD HH:MM:SS'로 (start, end) 반환.
-    """
     win = resolve_week_window_kst(text, now=now)
     if not win:
         return None
@@ -117,9 +107,6 @@ def resolve_week_window_strings(text: str, now: datetime | None = None) -> tuple
     return _fmt_ts(a), _fmt_ts(b)
 
 
-# -----------------------------------------------------------------------------
-# 한국어 시간대(오전/오후/저녁/밤/새벽) + '시/분' 파서
-# -----------------------------------------------------------------------------
 _PART_OF_DAY = {
     "오전": "am",
     "새벽": "am",
@@ -128,7 +115,6 @@ _PART_OF_DAY = {
     "밤": "pm",
 }
 
-# 예) "밤 9시", "오전 10시 30분", "21시", "저녁 7시", "9시 이후"
 _TIME_PHRASE_RE = re.compile(
     r"(오전|오후|저녁|밤|새벽)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?",
     re.I
@@ -163,16 +149,11 @@ def extract_time_phrase_hhmmss(text: str) -> str | None:
     hour = int(m.group(2))
     minute = int(m.group(3) or 0)
     hour24 = _to_24h(hour, label)
-    # 범위 보정
     hour24 = max(0, min(23, hour24))
     minute = max(0, min(59, minute))
     return f"{hour24:02d}:{minute:02d}:00"
 
 
-# -----------------------------------------------------------------------------
-# "이후/이전/부터/까지/이상/이하/초과/미만" 시간 필터 파싱
-# -----------------------------------------------------------------------------
-# 예) "밤 9시 이후", "오전 10시 이전", "21시부터", "18시까지", "밤 11시 이상"
 _TIME_FILTER_RE = re.compile(
     r"((?:오전|오후|저녁|밤|새벽)?\s*\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?)\s*(이후|이전|부터|까지|이상|이하|초과|미만)",
     re.I
@@ -210,9 +191,6 @@ def extract_time_filter(text: str) -> tuple[str, str] | None:
     return op, hhmmss
 
 
-# -----------------------------------------------------------------------------
-# (선택) 일 단위 창도 파싱: "오늘/어제/내일" → [start, end)
-# -----------------------------------------------------------------------------
 def resolve_day_window_kst(text: str, now: datetime | None = None) -> tuple[datetime, datetime] | None:
     """
     '오늘/어제/내일'을 [start, end) 구간으로 반환. 없으면 None.
@@ -234,9 +212,6 @@ def resolve_day_window_kst(text: str, now: datetime | None = None) -> tuple[date
     return start, end
 
 
-# -----------------------------------------------------------------------------
-# 문자열 버전 헬퍼 (쿼리에서 바로 쓰고 싶을 때)
-# -----------------------------------------------------------------------------
 def to_yyyy_mm_dd_hh_mm_ss_strings(win: tuple[datetime, datetime]) -> tuple[str, str]:
     """
     (start_dt, end_dt) → ('YYYY-MM-DD HH:MM:SS', 'YYYY-MM-DD HH:MM:SS')

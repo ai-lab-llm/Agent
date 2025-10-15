@@ -47,7 +47,6 @@ def _robust_json(text: str) -> Dict[str, Any]:
             return data
     except Exception:
         pass
-    # 파싱 실패 시 안전 폴백
     return {"intent": "other"}
 
 def classify_intent_llm(question: str) -> str:
@@ -67,3 +66,19 @@ def list_known_names(limit: int = 5) -> list[str]:
     except Exception:
         pass
     return names[:limit]
+
+
+
+_MAX_PAT = re.compile(r"(가장\s*높|최대|최고|highest|max)", re.I)
+_MIN_PAT = re.compile(r"(가장\s*낮|최소|lowest|min)", re.I)
+_WHEN_PAT = re.compile(r"(언제|시각|시간|몇\s*시|시점|때)", re.I)
+
+def detect_extreme_direction(question: str) -> str | None:
+    if _MAX_PAT.search(question):
+        return "max"
+    if _MIN_PAT.search(question):
+        return "min"
+    return None
+
+def asks_when(question: str) -> bool:
+    return _WHEN_PAT.search(question) is not None
